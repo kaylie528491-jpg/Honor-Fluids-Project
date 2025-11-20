@@ -1,0 +1,72 @@
+%% Drug Delivery to Tumor Cells via Microvasculature (2D FEM)
+clc; clear; close all;
+
+%% Geometry and Mesh
+Lx = 1; Ly = 1;          % Tissue size (cm)
+Nx = 30; Ny = 30;        % Mesh resolution
+[X,Y] = meshgrid(linspace(0,Lx,Nx), linspace(0,Ly,Ny));
+tri = delaunay(X,Y);     % Triangular mesh for FEM
+N_nodes = length(X(:));
+
+%% Physical Parameters
+D = 1e-5;                % Diffusion coefficient (cm^2/s)
+vx = 0.05; vy = 0;       % Flow velocity (cm/s)
+k = 0.01;                % Consumption rate (1/s)
+Width = 0.01;            % Tissue thickness (cm)
+
+%% Source Term (Drug injection near x=0)
+Source = @(x,y) (x < 0.05) * 1;  % High drug near left boundary
+
+%% Initialize Global Matrices
+Accum_global = sparse(N_nodes,N_nodes);
+Diff_global = sparse(N_nodes,N_nodes);
+AdvX_global = sparse(N_nodes,N_nodes);
+AdvY_global = sparse(N_nodes,N_nodes);
+React_global = sparse(N_nodes,N_nodes);
+G_global = zeros(N_nodes,1);
+
+%% Loop over elements to assemble FEM matrices
+for i = 1:size(tri,1)
+    x1 = X(tri(i,1)); x2 = X(tri(i,2)); x3 = X(tri(i,3));
+    y1 = Y(tri(i,1)); y2 = Y(tri(i,2)); y3 = Y(tri(i,3));
+    
+    % Compute local FEM matrices using symbolic function
+    [Accum,Advec_x,Advec_y,Difsn,Gam_1,Gam_0] = FEM_Matrices_2D_Cartesian(D,k,k,Width,x1,x2,x3,y1,y2,y3);
+    
+    nodes = tri(i,:);
+    Accum_global(nodes,nodes) = Accum_global(nodes,nodes) + Accum;
+    Diff_global(nodes,nodes) = Diff_global(nodes,nodes) + Difsn;
+    AdvX_global(nodes,nodes) = AdvX_global(nodes,nodes) + Advec_x;
+    AdvY_global(nodes,nodes) = AdvY_global(nodes,nodes) + Advec_y;
+    React_global(nodes,nodes) = React_global(nodes,nodes) + Gam_1;
+    
+    % Source term (integrate over triangle)
+    G_global(nodes) = G_global(nodes) + Gam_0 * mean(Source([x1 x2 x3],[y1 y2 y3]));
+end
+
+%% Assemble global system
+M = Accum_global;
+K = Diff_global + React_global;
+K_adv = AdvX_global*vx + AdvY_global*vy;
+
+Jac = @(t,c)(-(K + K_adv));
+cdot = @(t,c)(-(K + K_adv)*c + G_global);
+
+%% Initial condition and time span
+c0 = zeros(N_nodes,1);   % Initial concentration
+tspan = [0 100];         % Simulation time (s)
+
+%% Solve ODE system
+options = odeset('Jacobian',Jac,'Mass',M);
+[t,C] = ode15s(cdot,tspan,c0,options);
+
+%% Visualization
+figure;
+for i = 1:length(t)
+    Z = zeros(Ny,Nx);
+    Z(:) = C(i,:);
+    contourf(X,Y,Z,20); colorbar;
+    title(['Drug Concentration at t = ', num2str(t(i)), ' s']);
+    xlabel('X (cm)'); ylabel('Y (cm)');
+    pause(0.1);
+end
