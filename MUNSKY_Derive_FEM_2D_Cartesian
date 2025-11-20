@@ -1,0 +1,64 @@
+%% Derive_FEM_2D_Cartesian
+%% Deriving the FEM Analysis for 2D diffusion in cylindrical coordinates. 
+% This function will derive the necessary expression for the FEM in 2 
+% dimensions (x,y - cylindrical). We will use a triangular mesh in x and y.
+% We will consider accumulation, diffusion, advection, and linear and 
+% constant reactions.
+clc
+close all
+clear all
+% We start by defining the symbolic variables that we will use:
+syms x1 x2 x3 y1 y2 y3 x y real
+syms D v_x v_y Gam0 Gam1 W real
+
+%% Verify that our triangle integration works.
+x_r = rand(3,1);
+y_r = rand(3,1);
+v1 = [(x_r(2)-x_r(1)),(y_r(2)-y_r(1)),0];
+v2 = [(x_r(3)-x_r(1)),(y_r(3)-y_r(1)),0];
+Area1 = 1/2*sqrt(sum(cross(v1,v2).^2));
+Area2 = eval(abs(Integrate_Over_Triangle(1,x_r(1),x_r(2),x_r(3),y_r(1),y_r(2),y_r(3),x,y)));
+Area1-Area2
+
+%% Simplifications for special cases
+D = @(x,y)D;           % Constant diffusion constant.
+Gam0 = @(x,y)Gam0;     % Constant zeroth order reaction rate.
+Gam1 = @(x,y)Gam1;     % Constant first order reaction rate.
+W = @(x,y)W;           % Constant width.
+
+syms v_x v_y real    % Constant flow rates.
+
+FEM_Fun_Name = 'FEM_Matrices_2D_Cartesian'; 
+
+%% Define FEM shape functions:
+A = [x1 y1 1;x2 y2 1;x3 y3 1];              % A*[fx;fy;f0] = eye(3) 
+Ainv = simplify(inv(A));                    % [fx;fy;f0] = Ainv
+f = [Ainv(1,:)*x+Ainv(2,:)*y+Ainv(3,:)]';   % f = fx*x+ fy*y + f0
+Del_f = [diff(f,x),diff(f,y)];              % The gradient of f
+
+%% (1) Compute the Accumulation matrix, Accum.
+dAccum = W(x,y)*(f*f');
+Accum = Integrate_Over_Triangle(dAccum,x1,x2,x3,y1,y2,y3,x,y)
+
+%% (2a) Now to compute the advective matrix (in x).
+dAdvec_x = v_x*W(x,y)*f*diff(f,x)';
+Advec_x = Integrate_Over_Triangle(dAdvec_x,x1,x2,x3,y1,y2,y3,x,y)/v_x
+
+%% (2b) Now to compute the advective matrix (in y).
+dAdvec_y = v_y*W(x,y)*f*diff(f,y)';
+Advec_y = Integrate_Over_Triangle(dAdvec_y,x1,x2,x3,y1,y2,y3,x,y)/v_y
+
+%% (3) Now to compute the diffusion matrix.
+dDiff = D(x,y)*W(x,y)*(Del_f*Del_f');
+Difsn = Integrate_Over_Triangle(dDiff,x1,x2,x3,y1,y2,y3,x,y)
+
+%% (4a) Now to compute the constant consumption vector.
+dGam0 = Gam0*W(x,y)*f;
+Gam_0 = Integrate_Over_Triangle(dGam0,x1,x2,x3,y1,y2,y3,x,y)
+
+%% (4b) Now to compute the linear consumption vector.
+dGam1 = Gam1*W(x,y)*(f*f');
+Gam_1 = Integrate_Over_Triangle(dGam1,x1,x2,x3,y1,y2,y3,x,y)
+
+%% (5) Finally, to Create a Matlab Function
+matlabFunction(Accum,Advec_x,Advec_y,Difsn,Gam_1,Gam_0,'File',FEM_Fun_Name);
